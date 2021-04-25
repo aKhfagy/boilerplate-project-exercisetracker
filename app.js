@@ -25,52 +25,51 @@ const userSchema = new mongoose.Schema({
     username: {
         type: String,
         required: true
-    }
-});
-
-const logSchema = new mongoose.Schema({
-    userID: {
-        type: String,
-        required: true
     },
-    description: {
-        type: String,
-        required: true
-    },
-    duration: {
-        type: Number,
-        required: true
-    },
-    date: {
-        type: Date,
-        default: Date.now
-    }
+    logs: [{
+        description: {
+                type: String,
+                required: true
+            },
+        duration: {
+                type: Number,
+                required: true
+            },
+        date: {
+                type: String,
+                required: false
+            }
+    }]
 });
 
 const User = mongoose.model('User', userSchema);
-const Log = mongoose.model('Log', logSchema);
 
 const createUser = async (name, done) => {
     if(isConnected()) {
         let user = new User({username: name});
         await user.save((err, data) => {
             if(err)
-                return console.log(err);
+                return done(err, null);
             done(null, data);
-        }).catch(err => console.log(err));
+        });
     }
     else {
         done(errorJson, null);
     }
 };
 
-const getUser = async (id, done) => {
+const getUser = async (done) => {
     if(isConnected()) {
-        await User.findById({_id: id}, (err, data) => {
+        await User.find({}, (err, data) => {
             if(err)
-                return console.log(err);
-            done(null, data);
-        }).catch(err => console.log(err));
+                return done(err, null);
+            const array = data.map(user => {
+                            return { 
+                                    'username': user.username, '_id': user._id 
+                                } 
+                            });
+            done(null, array);
+        });
     }
     else {
         done(errorJson, null);
@@ -80,17 +79,73 @@ const getUser = async (id, done) => {
 const createLog = async (log, done) => {
     if(isConnected()) {
         const entry = {
-            id: log.id,
             description: log.description,
             duration: log.duration
         };
-        if(log.date)
-            entry.date = log.date;
-        let exercise = new Log(entry);
-        await exercise.save((err, data) => {
+        if(log.date) {
+            if(/\d{4}-\d{2}-\d{2}/.test(log.date))
+                entry.date = new Date(log.date).toDateString();
+            else 
+                done({error: 'Invalid Date Format'}, null);
+        }
+        else 
+            entry.date = new Date().toDateString();
+        const id = log.id;
+        await User.findById(id, (err, user) => {
             if(err)
-                return console.log(err);
-            done(null, data);
+                return done(err, null);
+            user.logs.push(entry);
+            user.save((err, data) => {
+                if(err) 
+                    return done(err, null);
+                let here = data.logs[data.logs.length -1];
+                done(null, {
+                    _id: data._id,
+                    username: data.username,
+                    description: here.description,
+                    duration: here.duration,
+                    date: here.date
+                });
+            })
+        })
+    }
+    else {
+        done(errorJson, null);
+    }
+};
+
+const getLogs = async (entry, done) => {
+    if(isConnected()) {
+        const {id, from, to, limit} = entry;
+        await User.findById(id, (err, user) => {
+            if(err)
+                return done(err, null);
+            let result = user.logs.map(
+                item => {
+                    return {
+                        description: item.description,
+                        duration: item.duration, 
+                        date: item.date 
+                    };
+            });
+            if (from)
+                result = result.filter(
+                    log => 
+                    new Date(log.date).getTime() 
+                    >= new Date(from).getTime()); 
+            if (to)
+                result = result.filter(
+                    log => 
+                    new Date(log.date).getTime() 
+                    <= new Date(to).getTime());
+            if (limit)
+                result = result.slice(0, limit);
+            done(null, {
+                _id: user._id,
+                username: user.username,
+                count: result.length,
+                log: result
+            });
         });
     }
     else {
@@ -98,13 +153,7 @@ const createLog = async (log, done) => {
     }
 };
 
-const getLogs = async (id, done) => {
-
-};
-
 // Export models
-exports.UserModel = User;
-exports.LogModel = Log;
 exports.createUser = createUser;
 exports.getUser = getUser;
 exports.createLog = createLog;
